@@ -1,0 +1,423 @@
+﻿<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <title>Copics OCR</title>
+    <script src="tesseract.min.js"></script>
+    <style>
+        :root {
+            --wine: rgb(110, 26, 55);
+            --rose: rgb(174, 36, 72);
+            --teal: rgb(114, 186, 169);
+            --mint: rgb(213, 231, 181);
+            --ink: rgb(42, 16, 28);
+            --paper: #ffffff;
+            --shadow: rgba(47, 16, 30, 0.18);
+        }
+        body {
+            font-family: "Aptos", "Candara", "Calibri", "Trebuchet MS", sans-serif;
+            padding: 18px;
+            background:
+                radial-gradient(220px 220px at 90% 0%, rgba(174, 36, 72, 0.16), transparent 70%),
+                radial-gradient(240px 240px at 10% 100%, rgba(114, 186, 169, 0.24), transparent 70%),
+                linear-gradient(180deg, rgba(213, 231, 181, 0.9) 0%, rgba(255, 255, 255, 0.96) 100%);
+            margin: 0;
+            color: var(--ink);
+        }
+        .container {
+            background: var(--paper);
+            padding: 18px;
+            border-radius: 18px;
+            border: 1px solid rgba(110, 26, 55, 0.12);
+            box-shadow: 0 18px 40px var(--shadow);
+            max-width: 860px;
+            margin: 0 auto;
+        }
+        .header {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            margin-bottom: 10px;
+        }
+        .logo {
+            width: 44px;
+            height: 44px;
+            border-radius: 12px;
+            background: linear-gradient(140deg, rgba(110, 26, 55, 0.08), rgba(174, 36, 72, 0.08));
+            display: grid;
+            place-items: center;
+        }
+        .logo img {
+            width: 32px;
+            height: 32px;
+        }
+        h2 { margin: 0; font-size: 20px; }
+        .subtitle { margin: 2px 0 0 0; font-size: 12px; color: rgba(42, 16, 28, 0.6); }
+        .status {
+            margin: 12px 0;
+            padding: 10px 12px;
+            border-radius: 10px;
+            background: rgba(110, 26, 55, 0.08);
+            font-weight: 600;
+        }
+        .status.processing { background: rgba(174, 36, 72, 0.16); color: rgb(110, 26, 55); }
+        .status.success { background: rgba(114, 186, 169, 0.28); color: rgb(20, 52, 46); }
+        .status.error { background: rgba(110, 26, 55, 0.18); color: rgb(110, 26, 55); }
+        img {
+            max-width: 100%;
+            border: 1px solid rgba(110, 26, 55, 0.15);
+            border-radius: 12px;
+            display: block;
+            margin: 12px 0;
+        }
+        textarea {
+            width: 100%;
+            height: 220px;
+            margin-top: 10px;
+            font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+            font-size: 12px;
+            padding: 12px;
+            border: 1px solid rgba(110, 26, 55, 0.15);
+            border-radius: 10px;
+            resize: vertical;
+            box-sizing: border-box;
+        }
+        .btn-row {
+            display: flex;
+            gap: 10px;
+            flex-wrap: wrap;
+            margin-top: 10px;
+        }
+        button {
+            background: linear-gradient(180deg, var(--rose) 0%, var(--wine) 100%);
+            color: white;
+            border: none;
+            padding: 12px 16px;
+            border-radius: 10px;
+            cursor: pointer;
+            font-size: 14px;
+            font-weight: 600;
+        }
+        button:disabled { opacity: 0.6; cursor: not-allowed; }
+        .secondary {
+            background: linear-gradient(180deg, rgba(114, 186, 169, 0.85) 0%, rgba(114, 186, 169, 1) 100%);
+            color: rgb(20, 52, 46);
+        }
+        .success {
+            background: linear-gradient(180deg, rgba(213, 231, 181, 1) 0%, rgba(114, 186, 169, 1) 100%);
+            color: rgb(20, 52, 46);
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <div class="logo">
+                <img src="logo.svg" alt="Copics logo" />
+            </div>
+            <div>
+                <h2>Copics</h2>
+                <p class="subtitle">OCR pre vybranu oblast</p>
+            </div>
+        </div>
+        <div class="status" id="status">Nacitavam obraz...</div>
+        <img id="screenshot" alt="Screenshot" />
+        <div class="btn-row">
+            <button id="extractBtn">Spustit OCR</button>
+            <button class="success" id="copyBtn" style="display:none;">Kopirovat text</button>
+            <button class="secondary" id="closeBtn">Zavriet</button>
+        </div>
+        <textarea id="result" placeholder="Text sa objavi tu..."></textarea>
+    </div>
+
+    <script>
+        const status = document.getElementById('status');
+        const result = document.getElementById('result');
+        const extractBtn = document.getElementById('extractBtn');
+        const copyBtn = document.getElementById('copyBtn');
+        const closeBtn = document.getElementById('closeBtn');
+        const img = document.getElementById('screenshot');
+
+        closeBtn.addEventListener('click', () => window.close());
+
+        chrome.storage.local.get('tempImageData', (res) => {
+            if (res.tempImageData) {
+                img.src = res.tempImageData;
+                status.textContent = 'Obraz nacitany. OCR sa spusti automaticky.';
+                runOCR();
+            } else {
+                status.textContent = 'Nenasiel sa obraz. Skus znovu vybrat oblast.';
+                status.className = 'status error';
+            }
+        });
+
+        extractBtn.addEventListener('click', runOCR);
+
+        async function runOCR() {
+            try {
+                status.textContent = 'Inicializujem OCR...';
+                status.className = 'status processing';
+                extractBtn.disabled = true;
+
+                let attempts = 0;
+                while (!window.Tesseract && attempts < 10) {
+                    await new Promise(resolve => setTimeout(resolve, 500));
+                    attempts++;
+                }
+
+                if (!window.Tesseract) {
+                    throw new Error('Tesseract.js not loaded');
+                }
+
+                status.textContent = 'Spracuvam obraz...';
+
+                const variants = await buildPreprocessVariants(img.src);
+                let bestText = '';
+                let bestScore = -Infinity;
+                for (let i = 0; i < variants.length; i++) {
+                    const prepared = variants[i];
+                    const { data } = await window.Tesseract.recognize(
+                        prepared,
+                        'eng',
+                        {
+                            logger: m => {
+                                if (m.status === 'recognizing text') {
+                                    status.textContent = `Spracuvam ${i + 1}/${variants.length}... ${Math.round(m.progress * 100)}%`;
+                                }
+                            },
+                            preserve_interword_spaces: '1',
+                            tessedit_pageseg_mode: '6',
+                            user_defined_dpi: '300'
+                        }
+                    );
+                    const candidate = normalizeOcrText((data && data.text) || '');
+                    const conf = typeof data.confidence === 'number' ? data.confidence : 0;
+                    const score = scoreOcrText(candidate) + conf * 0.2;
+                    if (score > bestScore) {
+                        bestScore = score;
+                        bestText = candidate;
+                    }
+                }
+
+                const cleaned = bestText;
+                if (cleaned && cleaned.trim()) {
+                    result.value = cleaned.trim();
+                    status.textContent = 'Hotovo';
+                    status.className = 'status success';
+                    copyBtn.style.display = 'inline-block';
+                } else {
+                    result.value = 'Nenasiel sa ziaden text. Skus vybrat iny vyrez.';
+                    status.textContent = 'Ziadny text';
+                    status.className = 'status error';
+                }
+            } catch (error) {
+                console.error('OCR Error:', error);
+                result.value = 'OCR chyba: ' + error.message;
+                status.textContent = 'OCR zlyhalo';
+                status.className = 'status error';
+            } finally {
+                extractBtn.disabled = false;
+            }
+        }
+
+        copyBtn.addEventListener('click', () => {
+            result.select();
+            document.execCommand('copy');
+            copyBtn.textContent = 'Skopirovane';
+            setTimeout(() => {
+                copyBtn.textContent = 'Kopirovat text';
+            }, 2000);
+        });
+
+        function buildPreprocessVariants(dataUrl) {
+            return Promise.all([
+                preprocessDataUrl(dataUrl, { maxWidth: 1600, maxHeight: 900 }),
+                preprocessDataUrl(dataUrl, { maxWidth: 1600, maxHeight: 900, mode: 'contrast' }),
+                preprocessDataUrl(dataUrl, { maxWidth: 1600, maxHeight: 900, mode: 'binary' })
+            ]);
+        }
+
+        function normalizeOcrText(raw) {
+            if (!raw) return '';
+            let text = String(raw).normalize('NFKC').replace(/\r\n?/g, '\n');
+            const replacements = {
+                '“': '"', '”': '"', '„': '"', '‟': '"',
+                '‘': '\'', '’': '\'', '‚': '\'', '‛': '\'',
+                '–': '-', '—': '-', '−': '-',
+                '…': '...', '•': '*', '·': '.', '×': 'x', '÷': '/', '°': 'o'
+            };
+            text = text.replace(/[“”„‟‘’‚‛–—−…•·×÷°]/g, (m) => replacements[m] || m);
+            text = text
+                .replace(/[\u00a0\u2007\u202f]/g, ' ')
+                .replace(/[\u200b-\u200f\ufeff]/g, '')
+                .replace(/[^\S\n]+/g, ' ')
+                .replace(/[ \t]+\n/g, '\n')
+                .replace(/ +([,.;:!?%])(?=\s|$)/g, '$1')
+                .replace(/([([{]) +/g, '$1')
+                .replace(/ +([)\]}])/g, '$1')
+                .replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/g, '')
+                .split('\n')
+                .map((line) => line.replace(/[ \t]+$/g, ''))
+                .join('\n')
+                .replace(/\n{3,}/g, '\n\n')
+                .trim();
+            return text;
+        }
+
+        function scoreOcrText(text) {
+            if (!text) return -Infinity;
+            const clean = text.replace(/\s+/g, ' ').trim();
+            if (!clean) return -Infinity;
+            const bad = (clean.match(/[\u0000-\u001f\u007f]/g) || []).length;
+            const replacementLike = (clean.match(/[�]/g) || []).length;
+            const alnum = (clean.match(/[A-Za-z0-9]/g) || []).length;
+            const printable = (clean.match(/[^\s]/g) || []).length;
+            const density = printable > 0 ? alnum / printable : 0;
+            return clean.length - bad * 10 - replacementLike * 8 + density * 5;
+        }
+
+        function preprocessDataUrl(dataUrl, options) {
+            const { maxWidth, maxHeight, mode } = options || {};
+            return new Promise((resolve) => {
+                const image = new Image();
+                image.onload = () => {
+                    const srcW = image.naturalWidth || image.width;
+                    const srcH = image.naturalHeight || image.height;
+                    const scale = Math.min(1, (maxWidth || srcW) / srcW, (maxHeight || srcH) / srcH);
+                    const dstW = Math.max(1, Math.round(srcW * scale));
+                    const dstH = Math.max(1, Math.round(srcH * scale));
+                    const canvas = document.createElement('canvas');
+                    canvas.width = dstW;
+                    canvas.height = dstH;
+                    const ctx = canvas.getContext('2d', { willReadFrequently: true });
+                    ctx.drawImage(image, 0, 0, dstW, dstH);
+                    if (mode) {
+                        preprocessCanvas(ctx, dstW, dstH, mode);
+                    }
+                    applySharpen(ctx, dstW, dstH, 0.6);
+                    resolve(canvas.toDataURL('image/png'));
+                };
+                image.onerror = () => resolve(dataUrl);
+                image.src = dataUrl;
+            });
+        }
+
+        function preprocessCanvas(ctx, w, h, mode) {
+            const imgData = ctx.getImageData(0, 0, w, h);
+            const data = imgData.data;
+            const histogram = new Array(256).fill(0);
+
+            for (let i = 0; i < data.length; i += 4) {
+                const r = data[i];
+                const g = data[i + 1];
+                const b = data[i + 2];
+                const gray = Math.round(0.299 * r + 0.587 * g + 0.114 * b);
+                data[i] = data[i + 1] = data[i + 2] = gray;
+                histogram[gray]++;
+            }
+
+            if (mode === 'contrast') {
+                const bounds = percentileBounds(histogram, w * h, 0.02, 0.98);
+                const range = Math.max(1, bounds.high - bounds.low);
+                for (let i = 0; i < data.length; i += 4) {
+                    const v = Math.max(0, Math.min(255, Math.round((data[i] - bounds.low) * 255 / range)));
+                    data[i] = data[i + 1] = data[i + 2] = v;
+                }
+            }
+            if (mode === 'binary') {
+                const threshold = otsuThreshold(histogram, w * h);
+                let white = 0;
+                let black = 0;
+                for (let i = 0; i < data.length; i += 4) {
+                    const v = data[i] >= threshold ? 255 : 0;
+                    data[i] = data[i + 1] = data[i + 2] = v;
+                    if (v === 255) white++; else black++;
+                }
+                if (white < black) {
+                    for (let i = 0; i < data.length; i += 4) {
+                        const v = data[i] === 255 ? 0 : 255;
+                        data[i] = data[i + 1] = data[i + 2] = v;
+                    }
+                }
+            }
+
+            ctx.putImageData(imgData, 0, 0);
+        }
+        function percentileBounds(hist, total, lowPct, highPct) {
+            const lowCount = Math.round(total * lowPct);
+            const highCount = Math.round(total * highPct);
+            let cum = 0;
+            let low = 0;
+            let high = 255;
+            for (let i = 0; i < 256; i++) {
+                cum += hist[i];
+                if (cum >= lowCount) {
+                    low = i;
+                    break;
+                }
+            }
+            cum = 0;
+            for (let i = 255; i >= 0; i--) {
+                cum += hist[i];
+                if (cum >= (total - highCount)) {
+                    high = i;
+                    break;
+                }
+            }
+            return { low, high };
+        }
+        function applySharpen(ctx, w, h, amount) {
+            const imgData = ctx.getImageData(0, 0, w, h);
+            const data = imgData.data;
+            const out = new Uint8ClampedArray(data.length);
+            const a = Math.max(0, Math.min(1, typeof amount === 'number' ? amount : 0.6));
+            const idx = (x, y, c) => ((y * w + x) * 4 + c);
+
+            for (let y = 1; y < h - 1; y++) {
+                for (let x = 1; x < w - 1; x++) {
+                    for (let c = 0; c < 3; c++) {
+                        const center = data[idx(x, y, c)];
+                        const top = data[idx(x, y - 1, c)];
+                        const bottom = data[idx(x, y + 1, c)];
+                        const left = data[idx(x - 1, y, c)];
+                        const right = data[idx(x + 1, y, c)];
+                        let v = center * (1 + 4 * a) - a * (top + bottom + left + right);
+                        v = v < 0 ? 0 : (v > 255 ? 255 : v);
+                        out[idx(x, y, c)] = v;
+                    }
+                    out[idx(x, y, 3)] = data[idx(x, y, 3)];
+                }
+            }
+            imgData.data.set(out);
+            ctx.putImageData(imgData, 0, 0);
+        }
+
+        function otsuThreshold(hist, total) {
+            let sum = 0;
+            for (let i = 0; i < 256; i++) sum += i * hist[i];
+            let sumB = 0;
+            let wB = 0;
+            let wF = 0;
+            let varMax = 0;
+            let threshold = 127;
+
+            for (let i = 0; i < 256; i++) {
+                wB += hist[i];
+                if (wB === 0) continue;
+                wF = total - wB;
+                if (wF === 0) break;
+                sumB += i * hist[i];
+                const mB = sumB / wB;
+                const mF = (sum - sumB) / wF;
+                const varBetween = wB * wF * (mB - mF) * (mB - mF);
+                if (varBetween > varMax) {
+                    varMax = varBetween;
+                    threshold = i;
+                }
+            }
+            return threshold;
+        }
+
+    </script>
+</body>
+</html>

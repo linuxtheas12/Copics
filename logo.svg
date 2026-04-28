@@ -1,0 +1,18 @@
+<svg width="256" height="256" viewBox="0 0 256 256" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="main" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="rgb(110, 26, 55)"></stop>
+      <stop offset="100%" stop-color="rgb(174, 36, 72)"></stop>
+    </linearGradient>
+  </defs>
+
+  <!-- hlavné C -->
+  <path d="M180 70 
+           A70 70 0 1 0 180 186" fill="none" stroke="url(#main)" stroke-width="16" stroke-linecap="round"></path>
+
+  <!-- scan lines -->
+  <rect x="110" y="105" width="50" height="8" rx="4" fill="rgb(114, 186, 169)"></rect>
+  <rect x="110" y="125" width="36" height="8" rx="4" fill="rgb(114, 186, 169)"></rect>
+  <rect x="110" y="145" width="44" height="8" rx="4" fill="rgb(213, 231, 181)"></rect>
+
+</svg>
